@@ -7,7 +7,7 @@ import numpy as np
 from city_coordinates import CITY_COORDINATES
 
 from simulation import (
-    calculate_risk,
+    calculate_risk, 
     dashboard_metrics,
     generate_recommendation,
     top_risky_cities,
