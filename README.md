@@ -42,6 +42,25 @@ Stage 1 covered the 34 NCRB metropolitan cities. **Stage 2 expands this into a f
 - ⚙️ **Improved Project Architecture** — modularized the codebase by separating routing, simulation, and interface logic, making the application easier to maintain and extend.
 - 🚀 **Performance & Usability Improvements** — optimized the application workflow, improved responsiveness, and enhanced the overall user experience while preserving all Stage 2 analytics and safety features.
 
+### **New in Stage 4:**
+
+- 🧭 **Advanced Safe Route Intelligence** — upgraded the route planner with a hybrid safety-ranking engine that evaluates multiple real-world driving routes using NCRB crime data, travel time, and distance to recommend the safest available option instead of only the shortest path.
+
+- 📍 **Smart GPS & Location Search** — added browser-based GPS detection along with live place search, allowing users to start navigation from their current location or any searched destination across India.
+
+- 🗺️ **Real-World Navigation Support** — introduced detailed turn-by-turn navigation, multiple route alternatives, interactive route comparison, and dynamic map visualization for a complete navigation experience.
+
+- 🔄 **Multi-Provider Routing & Geocoding** — integrated Google Routes and Google Geocoding APIs with automatic OpenStreetMap (OSRM & Nominatim) fallbacks, ensuring reliable routing and location lookup even when one service is unavailable.
+
+- 🛡️ **Enhanced Route Risk Analysis** — expanded the AI safety engine to analyze routes based on nearby NCRB crime intelligence, helping users choose paths that minimize exposure to higher-risk locations.
+
+- ⚙️ **Resilient Backend Architecture** — redesigned the routing module with modular components, automatic API fallback mechanisms, environment-based configuration, and improved maintainability for future extensions.
+
+- 🎨 **Refined User Experience** — polished the interface with smoother interactions, improved responsiveness, sticky navigation, enhanced Light/Dark theme support, and a more seamless end-to-end workflow.
+
+- 🚀 **Performance & Reliability Improvements** — optimized route generation, geocoding, and overall application performance while preserving all Stage 3 analytics, AI safety insights, and dashboard capabilities.
+
+
 ## 🛠️ Tech Stack & Tools
 
 - **Python 3.8+**
