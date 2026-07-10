@@ -157,6 +157,20 @@ def dashboard_metrics(df):
     """
     Returns key dashboard KPIs for the given dataframe slice.
     """
+    if df.empty:
+        metrics = {
+            "total_cities": 0,
+            "highest_risk_city": "N/A",
+            "average_risk": 0.0,
+            "average_safety": 0.0,
+            "high_risk": 0,
+            "medium_risk": 0,
+            "low_risk": 0,
+            "total_women_cases_2023": 0,
+            "total_children_cases_2023": 0
+        }
+        return metrics
+
     metrics = {
         "total_cities": len(df),
         "highest_risk_city": df.loc[df["risk_score"].idxmax(), "city"],
