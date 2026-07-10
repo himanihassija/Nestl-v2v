@@ -32,6 +32,16 @@ Stage 1 covered the 34 NCRB metropolitan cities. **Stage 2 expands this into a f
 - 📈 **Deeper Analytics** — Top 10 riskiest / safest locations, risk distribution, and a State/UT summary table with per-region aggregates
 - ✅ **Data-verified pipeline** — the full 2021–2023 dataset for all 34 metro cities was cross-checked line-by-line against the original NCRB source PDF (zero discrepancies found), and every location has confirmed lat/lon coverage for the map
 
+  **New in Stage 3:**
+- 🛣️ **AI Safe Route Planner** — introduced an intelligent route planning system that generates multiple travel routes between two locations and prioritizes them based on safety rather than just distance.
+- 📍 **Live Location Integration** — users can now use their current GPS location as the starting point for route planning, making safety recommendations more personalized and practical.
+- 🗺️ **Interactive Route Visualization** — added dynamic map-based visualization of routes with clear start/end markers and route comparisons for easier decision-making.
+- 🌙 **Modern UI with Theme Support** — completely redesigned the application interface with improved layouts, animations, responsive components, and support for both Light and Dark modes.
+- 🤖 **Enhanced AI Safety Recommendations** — extended the existing AI safety engine to provide route-level safety insights and smarter travel recommendations using location-aware crime intelligence.
+- 🔗 **Live Geocoding & Routing Services** — integrated external APIs to convert place names into geographic coordinates and fetch real-world routing information automatically.
+- ⚙️ **Improved Project Architecture** — modularized the codebase by separating routing, simulation, and interface logic, making the application easier to maintain and extend.
+- 🚀 **Performance & Usability Improvements** — optimized the application workflow, improved responsiveness, and enhanced the overall user experience while preserving all Stage 2 analytics and safety features.
+
 ## 🛠️ Tech Stack & Tools
 
 - **Python 3.8+**
