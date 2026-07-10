@@ -7,56 +7,49 @@ from sklearn.preprocessing import MinMaxScaler
 
 def calculate_risk(df):
     """
-    Calculates risk score and assigns risk levels.
+    Calculates a composite risk score and assigns risk levels (Low/Medium/High).
+    Incorporates women crime volume, crime rate, trend, and children crime if available.
     """
-
     df = df.copy()
 
-    # Crime Trend
+    # Crime Trend (women)
     df["trend"] = df["cases_2023"] - df["cases_2021"]
 
-    # Normalize Features
+    # Base features
+    features = ["cases_2023", "crime_rate_2023", "trend"]
+    norm_cols = ["cases_norm", "crime_norm", "trend_norm"]
+
     scaler = MinMaxScaler()
+    df[norm_cols] = scaler.fit_transform(df[features])
 
-    df[
-        [
-            "cases_norm",
-            "crime_norm",
-            "trend_norm"
-        ]
-    ] = scaler.fit_transform(
-        df[
-            [
-                "cases_2023",
-                "crime_rate_2023",
-                "trend"
-            ]
-        ]
-    )
-
-    # Weighted Risk Score
+    # Weighted Risk Score (women-focused)
     df["risk_score"] = (
         0.5 * df["cases_norm"]
         + 0.3 * df["crime_norm"]
         + 0.2 * df["trend_norm"]
     )
 
-    # Convert to Safety Score (0–100)
-    df["safety_score"] = (1 - df["risk_score"]) * 100
-    df["safety_score"] = df["safety_score"].round(1)
+    # Boost risk score if children crime data is present
+    if "children_cases_2023" in df.columns:
+        child_scaler = MinMaxScaler()
+        df["children_norm"] = child_scaler.fit_transform(
+            df[["children_cases_2023"]]
+        )
+        # Blend: 85% women risk + 15% children risk
+        df["risk_score"] = 0.85 * df["risk_score"] + 0.15 * df["children_norm"]
 
-    # Percentile Thresholds
+    # Convert to Safety Score (0–100)
+    df["safety_score"] = ((1 - df["risk_score"]) * 100).round(1)
+
+    # Percentile-based thresholds (relative classification)
     low = df["risk_score"].quantile(0.33)
     high = df["risk_score"].quantile(0.66)
 
     def classify(score):
-
         if score <= low:
             return "Low"
-
         elif score <= high:
             return "Medium"
-
         return "High"
 
     df["risk_level"] = df["risk_score"].apply(classify)
@@ -93,28 +86,33 @@ def simulate_crime_change(df, percentage):
 # ==========================================================
 
 def get_city_summary(df, city):
-
+    """
+    Returns a comprehensive summary dict for a given city/location.
+    Includes women crime, children crime, and territory metadata.
+    """
     row = df[df["city"] == city].iloc[0]
 
-    return {
-
+    summary = {
         "city": row["city"],
-
+        "state_ut": row.get("state_ut", "N/A"),
+        "territory_type": row.get("territory_type", "N/A"),
+        "district": row.get("district", "N/A"),
         "cases_2021": int(row["cases_2021"]),
-
         "cases_2022": int(row["cases_2022"]),
-
         "cases_2023": int(row["cases_2023"]),
-
         "crime_rate": float(row["crime_rate_2023"]),
-
+        "chargesheet_rate": float(row["chargesheet_rate"]),
         "risk_score": round(float(row["risk_score"]), 2),
-
         "risk_level": row["risk_level"],
-
-        "safety_score": round(float(row["safety_score"]), 1)
-
+        "safety_score": round(float(row["safety_score"]), 1),
     }
+
+    # Include children data if available
+    for col in ["children_cases_2023", "pocso_2023", "kidnapping_children_2023"]:
+        if col in row.index:
+            summary[col] = int(row[col])
+
+    return summary
 
 
 # ==========================================================
@@ -156,33 +154,24 @@ def generate_recommendation(risk_level):
 # ==========================================================
 
 def dashboard_metrics(df):
-
-    return {
-
+    """
+    Returns key dashboard KPIs for the given dataframe slice.
+    """
+    metrics = {
         "total_cities": len(df),
-
-        "highest_risk_city":
-            df.loc[
-                df["risk_score"].idxmax(),
-                "city"
-            ],
-
-        "average_risk":
-            round(df["risk_score"].mean(), 2),
-
-        "average_safety":
-            round(df["safety_score"].mean(), 1),
-
-        "high_risk":
-            (df["risk_level"] == "High").sum(),
-
-        "medium_risk":
-            (df["risk_level"] == "Medium").sum(),
-
-        "low_risk":
-            (df["risk_level"] == "Low").sum()
-
+        "highest_risk_city": df.loc[df["risk_score"].idxmax(), "city"],
+        "average_risk": round(df["risk_score"].mean(), 2),
+        "average_safety": round(df["safety_score"].mean(), 1),
+        "high_risk": int((df["risk_level"] == "High").sum()),
+        "medium_risk": int((df["risk_level"] == "Medium").sum()),
+        "low_risk": int((df["risk_level"] == "Low").sum()),
+        "total_women_cases_2023": int(df["cases_2023"].sum()),
     }
+
+    if "children_cases_2023" in df.columns:
+        metrics["total_children_cases_2023"] = int(df["children_cases_2023"].sum())
+
+    return metrics
 
 
 # ==========================================================

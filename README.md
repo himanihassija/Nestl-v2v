@@ -1,48 +1,57 @@
 # 🛡️ SHEild AI
 
-**AI-Powered Women's Safety Intelligence Platform** — hackathon project
+**AI-Powered Women & Children Safety Intelligence Platform** — hackathon project
 
-SHEild AI turns historical crime data into actionable safety insights for Indian metropolitan cities using data analytics and geospatial visualization. It helps people quickly understand relative safety risk in a city and get practical, AI-generated precautions before they travel.
-
-> 🚧 **Status: Stage 1** — core dashboard is live. More features planned in upcoming stages (see below).
+> 🚀 **Status: Stage 2** — nationwide coverage, children's safety data, and district-level intelligence added on top of the Stage 1 core dashboard.
 
 ---
 
-## ✅ Stage 1 — What's Built
+## 💡 The Idea
 
-- **Dashboard Overview** — key metrics like total cities analyzed, highest-risk city, average risk score, and high-risk city count
-- **City Safety Lookup** — select a city to see case counts, crime rate, computed risk score, and a 2021–2023 crime trend chart
-- **Interactive Risk Map** — geospatial view of all cities, color-coded and sized by risk level
-- **Analytics Dashboard** — top 5 / top 10 riskiest cities, risk distribution pie chart, and risk score histogram
-- **AI Assistant Tab** — automated High/Medium/Low risk assessment with tailored safety recommendations for the selected city
-- **Dataset** — NCRB Crime Against Women, Metropolitan Cities (2021–2023)
+Every year, NCRB publishes detailed crime data — but it's buried in dense PDF tables that almost nobody reads before they travel, relocate, or plan a route through an unfamiliar city. **SHEild AI** turns that raw, hard-to-parse government data into a single, visual, interactive dashboard: pick a city, and instantly see a relative safety score, a 3-year crime trend, and plain-language precautions generated for that specific risk level.
 
-## 🔜 Planned for Next Stages
+Stage 1 covered the 34 NCRB metropolitan cities. **Stage 2 expands this into a full national safety layer** — every Indian state capital/metro *and* all 8 Union Territories, down to the district level (73 locations total), plus a dedicated lens on crimes against children (POCSO, kidnapping/abduction), which Stage 1 didn't address at all.
 
-- [ ] Real-time crime data integration
-- [ ] Sub-zone / locality-level risk mapping
-- [ ] Route-based safety scoring
-- [ ] Mobile app with live location sharing
-- [ ] Improved ML-based risk prediction model
+## 🔗 Important Links
 
-## 🛠️ Tech Stack
+- **Live Deployment Link:** `[Insert URL here]`
+- **Demo Video Link:** `[Insert YouTube/Drive URL here]`
+- **GitHub Repository:** `https://github.com/himanihassija/Nestl-v2v`
 
-- **Python**
+## ✨ Features
+
+**Carried over from Stage 1:**
+- 📊 **Dashboard Overview** — key KPIs: locations analyzed, highest-risk city, high-risk zone count
+- 🏙️ **City Safety Lookup** — case counts, crime rate, computed risk score, and a 2021–2023 crime trend chart per city
+- 🗺️ **Interactive Risk Map** — geospatial view, toggle coloring by risk level or territory type, bubble-sized by case volume
+
+**New in Stage 2:**
+- 👧 **Children & UT Focus tab** — dedicated national context banner, full Union Territory breakdown (POCSO vs. kidnapping/abduction), and district-level deep dives for **Delhi's 10 districts** and **J&K's 17 districts**
+- 🗺️ **Nationwide + UT coverage** — expanded from 34 metro cities to **73 locations**, covering all 8 Union Territories (Delhi, J&K, Puducherry, Andaman & Nicobar, Dadra & Nagar Haveli and Daman & Diu, Ladakh, Lakshadweep, Chandigarh) alongside State-level metros
+- 🤖 **AI Safety Advisor** — expanded assessment with a live safety-score gauge, chargesheet rate, a simple next-year (2024) case projection, and a full exportable location summary table
+- 📈 **Deeper Analytics** — Top 10 riskiest / safest locations, risk distribution, and a State/UT summary table with per-region aggregates
+- ✅ **Data-verified pipeline** — the full 2021–2023 dataset for all 34 metro cities was cross-checked line-by-line against the original NCRB source PDF (zero discrepancies found), and every location has confirmed lat/lon coverage for the map
+
+## 🛠️ Tech Stack & Tools
+
+- **Python 3.8+**
 - **Streamlit** — web app framework
-- **Pandas / NumPy** — data processing
-- **Plotly** — interactive charts and maps
-- **Scikit-learn** — risk scoring
+- **Pandas / NumPy** — data processing and merging
+- **Plotly** — interactive charts, gauge, and geospatial map
+- **Scikit-learn** (`MinMaxScaler`) — feature normalization for the weighted risk-scoring model
+- **AI tools used:** Claude (Anthropic) — used throughout Stage 2 for code review, cross-verifying the dataset against the source NCRB PDF, catching bugs (unused imports, a hardcoded filename dependency, dead code paths), and drafting this documentation
+  <!-- Add/adjust this line if you also used ChatGPT, Copilot, etc. -->
 
 ## 📁 Project Structure
 
 ```
 Nestl-v2v/
-├── app.py                    # Main Streamlit application
-├── simulation.py              # Risk calculation & recommendation logic
-├── city_coordinates.py        # Lat/lon mapping for cities
-├── women_safety_dataset.csv   # NCRB crime dataset
-├── dataset women.pdf          # Source dataset reference
-└── requirements.txt           # Python dependencies
+├── app.py                     # Main Streamlit application (5 tabs)
+├── simulation.py               # Risk scoring, recommendations, projections
+├── city_coordinates.py         # Lat/lon mapping for all 73 locations
+├── women_safety_dataset.csv    # NCRB dataset — women + children crime, 2021–2023
+├── dataset_women.pdf           # Source NCRB reference document
+└── requirements.txt            # Python dependencies
 ```
 
 ## 🚀 Getting Started
@@ -66,13 +75,15 @@ streamlit run app.py
 
 The app opens automatically at `http://localhost:8501`.
 
-## 📌 How It Works
+## 📌 Documentation — How It Works
 
-1. Crime data is loaded and merged with city coordinates
-2. A risk score is calculated per city based on case volume, crime rate, and trend direction
-3. Cities are classified into **Low**, **Medium**, or **High** risk
-4. The dashboard surfaces this through interactive visualizations and an AI assistant that generates context-aware safety recommendations
+1. **Data ingestion:** `women_safety_dataset.csv` (women's crime + children's crime, 2021–2023, sourced from NCRB) is loaded and merged with per-city coordinates from `city_coordinates.py`.
+2. **Risk scoring:** Each location gets a weighted composite score — 50% case volume, 30% crime rate per lakh population, 20% year-over-year trend (all min-max normalized) — blended with a 15% children's-crime component where that data is available.
+3. **Classification:** Locations are bucketed into **Low / Medium / High** risk using percentile thresholds (33rd/66th) computed once across the full dataset, so labels stay consistent whether you're viewing all of India or filtering down to a single state.
+4. **Presentation:** Five tabs surface this through KPIs, an interactive map, comparative analytics, a UT/children-focused deep dive, and an AI-generated advisor that turns the numeric risk level into specific, actionable precautions.
+
+**Coordinating with AI tools:** Claude was used as a second set of eyes on the codebase after Stage 1 — it independently re-derived every metro city's 2021–2023 figures from the raw NCRB PDF table and diffed them against the CSV to confirm data accuracy before Stage 2 features were built on top of it, then reviewed `app.py` and `simulation.py` for logic bugs and unused code paths.
 
 ---
 
-⚠️ Risk scores are relative estimates based on historical data — for awareness purposes only, not a prediction of individual crime.
+⚠️ Risk scores are relative estimates based on historical NCRB data — for awareness purposes only, not a prediction of individual crime.
