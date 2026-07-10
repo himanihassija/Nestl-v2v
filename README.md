@@ -60,6 +60,22 @@ Stage 1 covered the 34 NCRB metropolitan cities. **Stage 2 expands this into a f
 
 - 🚀 **Performance & Reliability Improvements** — optimized route generation, geocoding, and overall application performance while preserving all Stage 3 analytics, AI safety insights, and dashboard capabilities.
 
+### **New in Stage 5:**
+
+- 🗺️ **Google Maps JavaScript API Integration** — integrated the Google Maps JavaScript API to provide a fully interactive navigation experience with live maps, place search, and enhanced route visualization.
+
+- 🚨 **One-Tap SOS Emergency Feature** — introduced an SOS system that instantly opens WhatsApp with a pre-filled emergency message containing the user's live location, enabling faster communication with trusted contacts during emergencies.
+
+- 📍 **Enhanced Live Navigation Experience** — upgraded the route planner with real-time location handling, improved destination search, interactive markers, and a smoother end-to-end navigation workflow.
+
+- 🎨 **Modern UI & UX Redesign** — polished the entire application with a cleaner interface, improved layouts, smoother animations, responsive components, and an overall more intuitive user experience.
+
+- 🧭 **Improved Route Visualization** — enhanced route comparison by displaying multiple route alternatives with clear visual indicators, navigation details, and safety-focused recommendations.
+
+- ⚡ **Faster & More Reliable Performance** — optimized map rendering, routing workflows, and frontend responsiveness to deliver a faster and more seamless experience while preserving all Stage 4 analytics and AI safety features.
+
+- ⚙️ **Production-Ready Architecture** — refined the integration between the frontend, routing engine, and AI safety modules, making the application more modular, scalable, and easier to maintain.
+
 
 ## 🛠️ Tech Stack & Tools
 
