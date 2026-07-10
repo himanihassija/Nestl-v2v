@@ -1,3 +1,8 @@
+import os
+import json
+from dotenv import load_dotenv
+load_dotenv('env')  # loads 'env' file from the project root into os.environ
+
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
@@ -7,7 +12,7 @@ import numpy as np
 from city_coordinates import CITY_COORDINATES
 
 from simulation import (
-    calculate_risk, 
+    calculate_risk,
     dashboard_metrics,
     generate_recommendation,
     top_risky_cities,
@@ -28,8 +33,17 @@ _is_light  = _qp_theme == "light"
 chart_text = "#334155" if _is_light else "#94a3b8"
 chart_bg   = "rgba(0,0,0,0)"
 
-# GPS coordinates pushed into the URL by the "Use My Current Location"
-# button in the Safe Route Planner section (see bottom of this file).
+# Route planner search params — set by the JS form widget when user clicks Find Route.
+# Coordinates are already resolved in JS (via GPS or Places Autocomplete).
+_qp_olat  = st.query_params.get("o_lat")
+_qp_olon  = st.query_params.get("o_lon")
+_qp_dlat  = st.query_params.get("d_lat")
+_qp_dlon  = st.query_params.get("d_lon")
+_qp_oname = st.query_params.get("o_name", "Origin")
+_qp_dname = st.query_params.get("d_name", "Destination")
+_qp_sw    = st.query_params.get("sw", "50")      # safety weight 0-100
+_qp_lit   = st.query_params.get("lit", "1")      # include lighting 1/0
+_qp_rsearch = st.query_params.get("route_search", "0")  # "1" = triggered
 _qp_user_lat = st.query_params.get("user_lat")
 _qp_user_lon = st.query_params.get("user_lon")
 
@@ -1108,7 +1122,7 @@ st.subheader("Point A → Point B, weighted by NCRB crime data")
 
 st.info("""
 **How this works:** like Google Maps' shortest-path routing, this pulls real road-network
-routes between your two points (via OpenStreetMap's OSRM routing engine) — but instead of
+routes between your two points (via OpenStreetMap's OSRM routing engine or Google Routes API) — but instead of
 ranking them purely by distance/time, each alternative is also scored by how close it passes
 to higher-crime cities in this project's 34-city NCRB dataset. Use the slider below to weigh
 **Fastest** vs **Safest**.
@@ -1121,46 +1135,98 @@ score.
 
 covered_cities = sorted(CITY_COORDINATES.keys())
 
-# --------------------------------------------------
-# "USE MY LOCATION" BUTTON
-# Uses the browser's Geolocation API, then writes lat/lon into the
-# URL's query params (same pattern the theme toggle uses to talk to
-# the parent Streamlit page) so Python can read it back after rerun.
-# --------------------------------------------------
+# ── Hidden input for GPS coordinates to communicate with Python sandbox-compatibly ──
+st.markdown("""
+<style>
+div[data-testid="stTextInput"]:has(input[aria-label="hidden_gps_coords"]) {
+    display: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+hidden_gps_coords = st.text_input("hidden_gps_coords", key="hidden_gps_coords", label_visibility="collapsed")
 
-components.html("""
+user_lat = None
+user_lon = None
+if hidden_gps_coords:
+    try:
+        import json
+        gdata = json.loads(hidden_gps_coords)
+        user_lat = float(gdata.get("lat"))
+        user_lon = float(gdata.get("lon"))
+    except Exception:
+        pass
+
+# ── GPS Button Component ──
+# Uses React value setter to write coordinates reload-free directly back to Streamlit
+_gps_button_html = f"""
 <div style="margin-bottom:10px;">
   <button id="gps-btn" style="
       background:#f43f5e; color:white; border:none; border-radius:8px;
       padding:8px 16px; font-family:Inter,sans-serif; font-size:0.85rem;
-      font-weight:600; cursor:pointer;">
+      font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px;">
       📍 Use My Current Location as Start Point
   </button>
+  <div id="gps-status" style="font-family:Inter,sans-serif; font-size:0.75rem; color:#10b981; margin-top:5px; min-height:16px;"></div>
 </div>
 <script>
-document.getElementById('gps-btn').addEventListener('click', function () {
-    if (!navigator.geolocation) {
-        alert('Geolocation is not supported by this browser.');
+document.getElementById('gps-btn').addEventListener('click', function () {{
+    var btn = this, status = document.getElementById('gps-status');
+    if (!navigator.geolocation) {{
+        status.style.color = '#ef4444';
+        status.textContent = '❌ Geolocation is not supported by this browser.';
         return;
-    }
-    navigator.geolocation.getCurrentPosition(function (pos) {
+    }}
+    btn.disabled = true; btn.textContent = '⏳ Locating…';
+    status.textContent = '';
+    navigator.geolocation.getCurrentPosition(function (pos) {{
         var lat = pos.coords.latitude.toFixed(6);
         var lon = pos.coords.longitude.toFixed(6);
-        var url = new URL(window.parent.location.href);
-        url.searchParams.set('user_lat', lat);
-        url.searchParams.set('user_lon', lon);
-        window.parent.location.href = url.toString();
-    }, function (err) {
-        alert('Could not get your location: ' + err.message);
-    });
-});
+        var data = {{lat: lat, lon: lon}};
+        
+        var inputEl = window.parent.document.querySelector('input[aria-label="hidden_gps_coords"]');
+        if (inputEl) {{
+            try {{
+                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                nativeInputValueSetter.call(inputEl, JSON.stringify(data));
+                inputEl.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                status.textContent = '✅ Location captured successfully!';
+            }} catch(e) {{
+                status.style.color = '#ef4444';
+                status.textContent = '⚠️ Sandbox blocked direct access. Trying fallback URL redirect...';
+                var url = new URL(window.parent.location.href);
+                url.searchParams.set('user_lat', lat);
+                url.searchParams.set('user_lon', lon);
+                window.parent.location.href = url.toString();
+            }}
+        }} else {{
+            // Fallback if not found
+            var url = new URL(window.parent.location.href);
+            url.searchParams.set('user_lat', lat);
+            url.searchParams.set('user_lon', lon);
+            window.parent.location.href = url.toString();
+        }}
+        btn.disabled = false; btn.innerHTML = '📍 Use My Current Location as Start Point';
+    }}, function (err) {{
+        status.style.color = '#ef4444';
+        status.textContent = '⚠️ ' + err.message;
+        btn.disabled = false; btn.innerHTML = '📍 Use My Current Location as Start Point';
+    }}, {{enableHighAccuracy: true, timeout: 10000}});
+}});
 </script>
-""", height=55)
+"""
+components.html(_gps_button_html, height=55)
 
+# Also check query parameters as fallback
+_qp_user_lat = st.query_params.get("user_lat")
+_qp_user_lon = st.query_params.get("user_lon")
 if _qp_user_lat and _qp_user_lon:
+    user_lat = float(_qp_user_lat)
+    user_lon = float(_qp_user_lon)
+
+if user_lat and user_lon:
     st.success(
         f"📍 Using your current GPS location as the start point: "
-        f"({float(_qp_user_lat):.4f}, {float(_qp_user_lon):.4f})"
+        f"({user_lat:.4f}, {user_lon:.4f})"
     )
 
 route_col1, route_col2 = st.columns(2)
@@ -1171,7 +1237,7 @@ with route_col1:
         "Origin input",
         ["Use GPS location", "Pick a covered city", "Enter an address"],
         label_visibility="collapsed",
-        index=0 if (_qp_user_lat and _qp_user_lon) else 1,
+        index=0 if (user_lat and user_lon) else 1,
         key="origin_mode"
     )
     origin_city_pick = None
@@ -1231,12 +1297,12 @@ if find_route_clicked:
     # ---- Resolve origin coordinates ----
     origin_coords = None
     if origin_mode == "Use GPS location":
-        if _qp_user_lat and _qp_user_lon:
-            origin_coords = (float(_qp_user_lat), float(_qp_user_lon))
+        if user_lat and user_lon:
+            origin_coords = (user_lat, user_lon)
         else:
             st.error(
-                "No GPS location captured yet — click 'Use My Current Location' above "
-                "and allow the browser's permission prompt first."
+                "No GPS location captured yet — click 'Use My Current Location as Start Point' "
+                "above and allow the browser's permission prompt first."
             )
     elif origin_mode == "Pick a covered city":
         origin_coords = CITY_COORDINATES.get(origin_city_pick)
@@ -1266,13 +1332,10 @@ if find_route_clicked:
             raw_routes = get_route_alternatives(origin_coords, dest_coords)
 
         if not raw_routes:
-            st.error("""
-Couldn't fetch a route right now. This usually means either:
-- the public OSRM routing server is temporarily unavailable, or
-- this environment doesn't have outbound internet access.
-
-Try again in a moment, or deploy this app somewhere with normal internet access.
-""")
+            st.error(
+                "Couldn't fetch routes. Check that your Google Routes API key is active "
+                "and has the Routes API enabled, or try again in a moment."
+            )
             st.session_state.pop("route_results", None)
         else:
             with st.spinner("Scoring routes against NCRB data" + (" and street-level features..." if include_lighting else "...")):
@@ -1285,6 +1348,9 @@ Try again in a moment, or deploy this app somewhere with normal internet access.
                 "ranked": ranked,
                 "origin_coords": origin_coords,
                 "dest_coords": dest_coords,
+                "origin_name": origin_address or origin_city_pick or "My Location",
+                "dest_name": dest_address or dest_city_pick or "Destination",
+                "include_lighting": include_lighting,
             }
 
 # --------------------------------------------------
@@ -1299,6 +1365,21 @@ def _risk_badge(avg_risk):
         return "🟡 Moderate", "#f59e0b"
     else:
         return "🟠 Elevated", "#f97316"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 if "route_results" in st.session_state:
@@ -1446,18 +1527,20 @@ if "route_results" in st.session_state:
     ))
 
     risk_color = {"Low": "#10b981", "Medium": "#f59e0b", "High": "#ef4444"}
-    for c in best["risk_info"]["nearby_cities"]:
-        city_row = df[df["city"] == c["city"]]
-        if city_row.empty:
-            continue
-        crow = city_row.iloc[0]
-        route_map.add_trace(go.Scattermap(
-            lat=[crow["lat"]], lon=[crow["lon"]],
-            mode="markers",
-            marker=dict(size=10, color=risk_color.get(c["risk_level"], "#94a3b8")),
-            name=f"{c['city']} ({c['risk_level']} risk)",
-            hoverinfo="name"
-        ))
+    for r_level, color in risk_color.items():
+        level_df = df[(df["risk_level"] == r_level) & (~df["lat"].isna()) & (~df["lon"].isna())]
+        if not level_df.empty:
+            route_map.add_trace(go.Scattermap(
+                lat=level_df["lat"].tolist(),
+                lon=level_df["lon"].tolist(),
+                mode="markers",
+                marker=dict(size=12, color=color, opacity=0.8),
+                name=f"NCRB {r_level} Risk Zone",
+                text=[f"{c} ({r_level} Risk)" for c in level_df["city"]],
+                hoverinfo="text",
+                showlegend=True
+            ))
+
 
     mid_lat = (origin_coords[0] + dest_coords[0]) / 2
     mid_lon = (origin_coords[1] + dest_coords[1]) / 2
@@ -1478,5 +1561,654 @@ if "route_results" in st.session_state:
     st.caption(
         "Green route = top recommendation for your chosen Fastest/Safest priority. "
         "Markers show nearby NCRB-covered cities colored by risk level. "
-        "Routing via OSRM (OpenStreetMap) · Geocoding via Nominatim (OpenStreetMap)."
+        "Routing via Google Routes API · Geocoding via Google Geocoding API."
     )
+
+    # ==========================================================
+    # LIVE NAVIGATION ASSISTANT
+    # ==========================================================
+
+    st.markdown("---")
+    st.subheader("🧭 Live Navigation Assistant")
+    st.markdown(
+        "Click **▶ Start Navigation** to begin turn-by-turn GPS navigation along the "
+        "recommended route. The assistant tracks your real position, announces upcoming "
+        "turns, and alerts you when entering higher-risk areas."
+    )
+
+    # Build serialisable versions of data for JS
+    best_steps = best.get("turn_steps", [])
+    ncrb_cities_for_nav = [
+        {
+            "city": row["city"],
+            "lat": float(row["lat"]),
+            "lon": float(row["lon"]),
+            "risk_level": row["risk_level"],
+            "risk_score": float(row["risk_score"]),
+        }
+        for _, row in df.iterrows()
+        if not pd.isna(row.get("lat")) and not pd.isna(row.get("lon"))
+    ]
+    best_polyline = [{"lat": lat, "lon": lon} for lat, lon in best["coords"]]
+
+    # Google Maps JS key (for the embedded map tile in the navigation widget)
+    _gmaps_key = os.environ.get("maps_api", "")
+
+    nav_data_json = json.dumps({
+        "steps": best_steps,
+        "polyline": best_polyline,
+        "ncrb_cities": ncrb_cities_for_nav,
+        "origin": {"lat": origin_coords[0], "lon": origin_coords[1]},
+        "dest": {"lat": dest_coords[0], "lon": dest_coords[1]},
+        "distance_km": best["distance_km"],
+        "duration_min": best["duration_min"],
+        "road_summary": best.get("road_summary", ""),
+        "gmaps_key": _gmaps_key,
+        "is_light": _is_light,
+    })
+
+    nav_widget_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: {'#f8fafc' if _is_light else '#0f172a'};
+    color: {'#0f172a' if _is_light else '#f8fafc'};
+    height: 100%; overflow: hidden;
+  }}
+  #nav-shell {{
+    display: flex; flex-direction: column; height: 100vh; padding: 0;
+  }}
+  /* ── Start button ── */
+  #start-btn {{
+    background: linear-gradient(135deg, #f43f5e, #ec4899);
+    color: white; border: none; border-radius: 12px;
+    padding: 14px 28px; font-size: 1rem; font-weight: 700;
+    cursor: pointer; margin: 16px auto; display: block;
+    box-shadow: 0 4px 20px rgba(244,63,94,0.4);
+    transition: transform .15s, box-shadow .15s;
+  }}
+  #start-btn:hover {{ transform: translateY(-2px); box-shadow: 0 6px 28px rgba(244,63,94,0.55); }}
+  #start-btn:disabled {{ opacity: .5; cursor: default; transform: none; }}
+
+  /* ── HUD ── */
+  #nav-hud {{
+    display: none; flex-direction: column; height: 100%;
+  }}
+  /* Next-turn card */
+  #turn-card {{
+    background: {'rgba(15,23,42,0.97)' if not _is_light else 'rgba(248,250,252,0.97)'};
+    border-bottom: 1px solid {'rgba(255,255,255,0.1)' if not _is_light else 'rgba(15,23,42,0.1)'};
+    padding: 12px 16px; display: flex; align-items: center; gap: 16px;
+    flex-shrink: 0;
+  }}
+  #maneuver-icon {{
+    font-size: 2.6rem; line-height: 1; width: 52px; text-align: center; flex-shrink: 0;
+  }}
+  #turn-info {{ flex: 1; min-width: 0; }}
+  #turn-dist {{
+    font-size: 1.6rem; font-weight: 800;
+    color: #f43f5e; line-height: 1.1;
+  }}
+  #turn-instruction {{
+    font-size: 0.95rem; font-weight: 500; margin-top: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    color: {'#0f172a' if _is_light else '#f8fafc'};
+  }}
+  #turn-after {{
+    font-size: 0.78rem; color: {'#64748b' if _is_light else '#94a3b8'}; margin-top: 2px;
+  }}
+  /* ETA strip */
+  #eta-strip {{
+    background: {'#10b981' if True else '#059669'};
+    color: white; display: flex; justify-content: space-around;
+    align-items: center; padding: 8px 16px; flex-shrink: 0;
+    font-weight: 700; font-size: 0.95rem;
+  }}
+  #eta-strip span {{ display: flex; flex-direction: column; align-items: center; }}
+  #eta-strip small {{ font-weight: 400; font-size: 0.7rem; opacity: 0.85; }}
+  /* Safety alert banner */
+  #safety-alert {{
+    display: none;
+    background: linear-gradient(90deg, #ef4444, #f97316);
+    color: white; padding: 10px 16px; font-size: 0.87rem; font-weight: 600;
+    text-align: center; flex-shrink: 0;
+    animation: pulse-border 1.5s infinite;
+  }}
+  @keyframes pulse-border {{
+    0%, 100% {{ opacity: 1; }}
+    50% {{ opacity: 0.82; }}
+  }}
+  /* Map container */
+  #map-container {{ flex: 1; position: relative; min-height: 0; }}
+  #nav-map {{ width: 100%; height: 100%; }}
+  /* GPS accuracy badge */
+  #gps-badge {{
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.65); color: white; padding: 4px 12px;
+    border-radius: 20px; font-size: 0.72rem; pointer-events: none;
+    backdrop-filter: blur(4px);
+  }}
+  /* Arrived overlay */
+  #arrived-overlay {{
+    display: none; position: absolute; inset: 0;
+    background: rgba(16,185,129,0.92); color: white;
+    flex-direction: column; align-items: center; justify-content: center;
+    font-size: 2rem; font-weight: 800; gap: 12px; text-align: center;
+    padding: 24px;
+  }}
+  #arrived-overlay.show {{ display: flex; }}
+  /* Step list (expandable) */
+  #steps-toggle {{
+    background: {'rgba(248,250,252,0.9)' if _is_light else 'rgba(15,23,42,0.9)'};
+    border-top: 1px solid {'rgba(15,23,42,0.1)' if _is_light else 'rgba(255,255,255,0.1)'};
+    padding: 6px 16px; font-size: 0.8rem; cursor: pointer;
+    color: {'#475569' if _is_light else '#94a3b8'}; text-align: center;
+    flex-shrink: 0; user-select: none;
+  }}
+  #steps-list {{
+    display: none; background: {'#f1f5f9' if _is_light else '#1e293b'};
+    max-height: 220px; overflow-y: auto; flex-shrink: 0;
+  }}
+  #steps-list.open {{ display: block; }}
+  .step-row {{
+    padding: 8px 16px; border-bottom: 1px solid {'rgba(15,23,42,0.07)' if _is_light else 'rgba(255,255,255,0.07)'};
+    font-size: 0.82rem; display: flex; gap: 10px; align-items: flex-start;
+  }}
+  .step-row.active {{ background: rgba(244,63,94,0.12); font-weight: 600; }}
+  .step-icon {{ font-size: 1rem; flex-shrink: 0; margin-top: 1px; }}
+  .step-text {{ flex: 1; }}
+  .step-dist {{ color: {'#64748b' if _is_light else '#94a3b8'}; font-size: 0.76rem; margin-top: 2px; }}
+</style>
+</head>
+<body>
+<div id="nav-shell">
+  <button id="start-btn">▶ Start Navigation</button>
+
+  <div id="nav-hud">
+    <!-- Next-turn card -->
+    <div id="turn-card">
+      <div id="maneuver-icon">↑</div>
+      <div id="turn-info">
+        <div id="turn-dist">—</div>
+        <div id="turn-instruction">Calculating…</div>
+        <div id="turn-after"></div>
+      </div>
+    </div>
+
+    <!-- ETA strip -->
+    <div id="eta-strip">
+      <span><span id="eta-time">—</span><small>ETA</small></span>
+      <span><span id="eta-dist">—</span><small>Remaining</small></span>
+      <span><span id="eta-mins">—</span><small>min left</small></span>
+    </div>
+
+    <!-- Safety alert -->
+    <div id="safety-alert" id="safety-alert">⚠️ <span id="alert-text"></span></div>
+
+    <!-- Map -->
+    <div id="map-container">
+      <div id="nav-map"></div>
+      <div id="gps-badge">📡 Acquiring GPS…</div>
+      <div id="arrived-overlay">
+        <div>🎉</div>
+        <div>You have arrived!</div>
+        <div style="font-size:1rem;font-weight:400;margin-top:8px;">at your destination</div>
+      </div>
+    </div>
+
+    <!-- Step list toggle -->
+    <div id="steps-toggle" onclick="toggleSteps()">▼ All turns (tap to expand)</div>
+    <div id="steps-list" id="steps-list"></div>
+  </div>
+</div>
+
+<script>
+// ──────────────────────────────────────────────
+// DATA from Python (baked in at render time)
+// ──────────────────────────────────────────────
+const NAV_DATA = {nav_data_json};
+const STEPS    = NAV_DATA.steps;
+const POLYLINE = NAV_DATA.polyline;   // [{{lat,lon}},...]
+const CITIES   = NAV_DATA.ncrb_cities;
+const ORIGIN   = NAV_DATA.origin;
+const DEST     = NAV_DATA.dest;
+const GMAPS_KEY = NAV_DATA.gmaps_key;
+const IS_LIGHT  = NAV_DATA.is_light;
+
+// ──────────────────────────────────────────────
+// STATE
+// ──────────────────────────────────────────────
+let map, userMarker, positionCircle, watchId;
+let currentStepIdx = 0;
+let spokenAt = {{}};          // stepIdx -> {{500:bool,200:bool,50:bool}}
+let alertedCities = {{}};
+let lastPos = null;
+let arrived = false;
+let totalRemainingM = (NAV_DATA.distance_km || 0) * 1000;
+let stepsOpen = false;
+
+// ──────────────────────────────────────────────
+// MANEUVER → EMOJI ICON
+// ──────────────────────────────────────────────
+const ICON_MAP = {{
+  'TURN_LEFT': '↰', 'TURN_RIGHT': '↱',
+  'TURN_SHARP_LEFT': '⬅', 'TURN_SHARP_RIGHT': '➡',
+  'TURN_SLIGHT_LEFT': '↖', 'TURN_SLIGHT_RIGHT': '↗',
+  'MERGE': '⇒', 'FORK_LEFT': '↙', 'FORK_RIGHT': '↘',
+  'ROUNDABOUT_LEFT': '↺', 'ROUNDABOUT_RIGHT': '↻',
+  'FERRY': '⛴', 'UTURN_LEFT': '↩', 'UTURN_RIGHT': '↪',
+  'STRAIGHT': '↑', 'NAME_CHANGE': '↑', 'CONTINUE': '↑',
+  'DEPART': '🚦', 'DESTINATION': '🏁',
+  'RAMP_LEFT': '↙', 'RAMP_RIGHT': '↘',
+}};
+function maneuverIcon(m) {{ return ICON_MAP[m] || '↑'; }}
+
+// ──────────────────────────────────────────────
+// HAVERSINE distance in metres
+// ──────────────────────────────────────────────
+function haversineM(lat1, lon1, lat2, lon2) {{
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}}
+
+// Nearest point on polyline to a lat/lon → {{lat,lon,idx,progress_m}}
+function snapToRoute(lat, lon) {{
+  let bestDist = Infinity, bestPt = null, bestIdx = 0;
+  for (let i = 0; i < POLYLINE.length; i++) {{
+    const d = haversineM(lat, lon, POLYLINE[i].lat, POLYLINE[i].lon);
+    if (d < bestDist) {{ bestDist = d; bestPt = POLYLINE[i]; bestIdx = i; }}
+  }}
+  return {{ pt: bestPt, idx: bestIdx, offRoute: bestDist > 80 }};
+}}
+
+// Remaining route distance from polyline index i
+function remainingDistM(fromIdx) {{
+  let d = 0;
+  for (let i = fromIdx; i < POLYLINE.length - 1; i++) {{
+    d += haversineM(POLYLINE[i].lat, POLYLINE[i].lon, POLYLINE[i+1].lat, POLYLINE[i+1].lon);
+  }}
+  return d;
+}}
+
+// ──────────────────────────────────────────────
+// FORMAT helpers
+// ──────────────────────────────────────────────
+function fmtDist(m) {{
+  if (m >= 1000) return (m/1000).toFixed(1) + ' km';
+  return Math.round(m/10)*10 + ' m';
+}}
+function fmtETA(mins) {{
+  const h = Math.floor(mins/60), m = Math.round(mins%60);
+  return h > 0 ? `${{h}}h ${{m}}m` : `${{m}} min`;
+}}
+
+// ──────────────────────────────────────────────
+// SPEECH
+// ──────────────────────────────────────────────
+function speak(text, interrupt) {{
+  if (!window.speechSynthesis) return;
+  if (interrupt) window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'en-IN';
+  u.rate = 1.05;
+  window.speechSynthesis.speak(u);
+}}
+
+// ──────────────────────────────────────────────
+// UPDATE HUD
+// ──────────────────────────────────────────────
+function updateHUD(userLat, userLon) {{
+  if (arrived) return;
+
+  const snap = snapToRoute(userLat, userLon);
+  const remM = remainingDistM(snap.idx);
+  totalRemainingM = remM;
+
+  // ETA
+  const speedKmh = (lastPos && lastPos.speed && lastPos.speed > 0)
+    ? lastPos.speed * 3.6 : 20; // default 20 km/h walking/slow
+  const etaMins = (remM / 1000) / speedKmh * 60;
+  document.getElementById('eta-dist').textContent = fmtDist(remM);
+  document.getElementById('eta-mins').textContent = Math.round(etaMins);
+  const etaDate = new Date(Date.now() + etaMins * 60000);
+  document.getElementById('eta-time').textContent =
+    etaDate.toLocaleTimeString([], {{hour:'2-digit', minute:'2-digit'}});
+
+  // Arrived?
+  const distToDest = haversineM(userLat, userLon, DEST.lat, DEST.lon);
+  if (distToDest < 40) {{
+    arrived = true;
+    speak('You have arrived at your destination!', true);
+    document.getElementById('arrived-overlay').classList.add('show');
+    if (watchId) navigator.geolocation.clearWatch(watchId);
+    return;
+  }}
+
+  // Find current step
+  // Advance step if user has passed it (distance to step start < 30m AND not last)
+  while (currentStepIdx < STEPS.length - 1) {{
+    const s = STEPS[currentStepIdx];
+    const dToStep = haversineM(userLat, userLon, s.lat, s.lon);
+    const nextDist = STEPS[currentStepIdx + 1]
+      ? haversineM(userLat, userLon, STEPS[currentStepIdx + 1].lat, STEPS[currentStepIdx + 1].lon)
+      : Infinity;
+    if (dToStep < 25 || nextDist < dToStep) {{ currentStepIdx++; }}
+    else break;
+  }}
+
+  const step = STEPS[currentStepIdx];
+  const nextStep = STEPS[currentStepIdx + 1] || null;
+  const distToStep = haversineM(userLat, userLon, step.lat, step.lon);
+
+  // Turn card
+  document.getElementById('maneuver-icon').textContent = maneuverIcon(step.maneuver || 'STRAIGHT');
+  document.getElementById('turn-dist').textContent = fmtDist(distToStep);
+  document.getElementById('turn-instruction').textContent = step.instruction;
+  document.getElementById('turn-after').textContent =
+    nextStep ? 'Then: ' + nextStep.instruction.substring(0, 48) : '';
+
+  // Voice — announce at 500, 200, 50 m
+  if (!spokenAt[currentStepIdx]) spokenAt[currentStepIdx] = {{}};
+  const spoken = spokenAt[currentStepIdx];
+  if (distToStep <= 500 && !spoken[500]) {{
+    speak('In ' + fmtDist(500) + ', ' + step.instruction, false);
+    spoken[500] = true;
+  }} else if (distToStep <= 200 && !spoken[200]) {{
+    speak('In ' + fmtDist(200) + ', ' + step.instruction, false);
+    spoken[200] = true;
+  }} else if (distToStep <= 50 && !spoken[50]) {{
+    speak(step.instruction, true);
+    spoken[50] = true;
+  }}
+
+  // Highlight active step in list
+  document.querySelectorAll('.step-row').forEach((el, i) => {{
+    el.classList.toggle('active', i === currentStepIdx);
+  }});
+
+  // Safety zone check
+  CITIES.forEach(c => {{
+    if (!c.lat || !c.lon) return;
+    const d = haversineM(userLat, userLon, c.lat, c.lon);
+    if (d < 10000 && c.risk_level === 'High' && !alertedCities[c.city]) {{
+      alertedCities[c.city] = true;
+      const msg = `Caution: entering a higher-risk area near ${{c.city}}. Stay alert.`;
+      document.getElementById('alert-text').textContent = msg;
+      document.getElementById('safety-alert').style.display = 'block';
+      speak(msg, false);
+      setTimeout(() => {{ document.getElementById('safety-alert').style.display = 'none'; }}, 8000);
+    }}
+  }});
+
+  // GPS badge
+  if (snap.offRoute) {{
+    document.getElementById('gps-badge').textContent = '⚠️ Off route by more than 80 m';
+    document.getElementById('gps-badge').style.background = 'rgba(239,68,68,0.8)';
+  }} else {{
+    document.getElementById('gps-badge').textContent = '📡 GPS active';
+    document.getElementById('gps-badge').style.background = 'rgba(0,0,0,0.65)';
+  }}
+
+  // Move map
+  if (map) {{
+    map.panTo({{lat: userLat, lng: userLon}});
+    userMarker.setPosition({{lat: userLat, lng: userLon}});
+    positionCircle.setCenter({{lat: userLat, lng: userLon}});
+  }}
+}}
+
+// ──────────────────────────────────────────────
+// STEP LIST
+// ──────────────────────────────────────────────
+function buildStepList() {{
+  const list = document.getElementById('steps-list');
+  list.innerHTML = '';
+  STEPS.forEach((s, i) => {{
+    const row = document.createElement('div');
+    row.className = 'step-row' + (i === 0 ? ' active' : '');
+    row.innerHTML = `
+      <div class="step-icon">${{maneuverIcon(s.maneuver || 'STRAIGHT')}}</div>
+      <div class="step-text">
+        <div>${{s.instruction}}</div>
+        ${{s.distance_m > 0 ? `<div class="step-dist">${{fmtDist(s.distance_m)}}</div>` : ''}}
+      </div>`;
+    list.appendChild(row);
+  }});
+}}
+function toggleSteps() {{
+  stepsOpen = !stepsOpen;
+  document.getElementById('steps-list').classList.toggle('open', stepsOpen);
+  document.getElementById('steps-toggle').textContent =
+    stepsOpen ? '▲ All turns (tap to collapse)' : '▼ All turns (tap to expand)';
+}}
+
+// ──────────────────────────────────────────────
+// GOOGLE MAPS INIT
+// ──────────────────────────────────────────────
+function initMap() {{
+  const center = {{lat: ORIGIN.lat, lng: ORIGIN.lon}};
+  const mapStyle = IS_LIGHT ? [] : [
+    {{elementType:'geometry',stylers:[{{color:'#1e293b'}}]}},
+    {{elementType:'labels.text.fill',stylers:[{{color:'#94a3b8'}}]}},
+    {{featureType:'road',elementType:'geometry',stylers:[{{color:'#334155'}}]}},
+    {{featureType:'road',elementType:'labels.text.fill',stylers:[{{color:'#94a3b8'}}]}},
+    {{featureType:'water',elementType:'geometry',stylers:[{{color:'#0f172a'}}]}},
+    {{featureType:'poi',stylers:[{{visibility:'off'}}]}},
+    {{featureType:'transit',stylers:[{{visibility:'off'}}]}},
+  ];
+
+  map = new google.maps.Map(document.getElementById('nav-map'), {{
+    zoom: 16,
+    center: center,
+    mapTypeId: 'roadmap',
+    disableDefaultUI: true,
+    zoomControl: true,
+    styles: mapStyle,
+  }});
+
+  // Draw route polyline
+  const path = POLYLINE.map(p => ({{lat: p.lat, lng: p.lon}}));
+  new google.maps.Polyline({{
+    path: path,
+    geodesic: true,
+    strokeColor: '#f43f5e',
+    strokeOpacity: 0.9,
+    strokeWeight: 6,
+    map: map,
+  }});
+
+  // Start/end markers
+  new google.maps.Marker({{
+    position: {{lat: ORIGIN.lat, lng: ORIGIN.lon}},
+    map: map,
+    title: 'Start',
+    icon: {{ url: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png' }},
+  }});
+  new google.maps.Marker({{
+    position: {{lat: DEST.lat, lng: DEST.lon}},
+    map: map,
+    title: 'Destination',
+    icon: {{ url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png' }},
+  }});
+
+  // User position marker (blue dot)
+  userMarker = new google.maps.Marker({{
+    position: center,
+    map: map,
+    title: 'You',
+    icon: {{
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: 10,
+      fillColor: '#3b82f6',
+      fillOpacity: 1,
+      strokeColor: '#ffffff',
+      strokeWeight: 3,
+    }},
+    zIndex: 999,
+  }});
+
+  // Accuracy circle
+  positionCircle = new google.maps.Circle({{
+    map: map,
+    center: center,
+    radius: 0,
+    strokeColor: '#3b82f6',
+    strokeOpacity: 0.3,
+    strokeWeight: 1,
+    fillColor: '#3b82f6',
+    fillOpacity: 0.08,
+  }});
+
+  // NCRB city markers & threat overlay zones
+  CITIES.forEach(c => {{
+    if (!c.lat || !c.lon) return;
+    const colorMap = {{High:'#ef4444', Medium:'#f59e0b', Low:'#10b981'}};
+    const color = colorMap[c.risk_level] || '#94a3b8';
+    
+    // Draw threat radius circle based on risk level
+    const radiusMap = {{High: 30000, Medium: 20000, Low: 10000}};
+    const opacityMap = {{High: 0.12, Medium: 0.07, Low: 0.03}};
+    new google.maps.Circle({{
+      map: map,
+      center: {{lat: c.lat, lng: c.lon}},
+      radius: radiusMap[c.risk_level] || 15000,
+      fillColor: color,
+      fillOpacity: opacityMap[c.risk_level] || 0.05,
+      strokeColor: color,
+      strokeOpacity: 0.20,
+      strokeWeight: 1,
+      clickable: false,
+    }});
+
+    // Draw central dot marker
+    new google.maps.Marker({{
+      position: {{lat: c.lat, lng: c.lon}},
+      map: map,
+      title: c.city + ' (' + c.risk_level + ' Risk, Score: ' + c.risk_score + ')',
+      icon: {{
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 6,
+        fillColor: color,
+        fillOpacity: 0.9,
+        strokeColor: '#ffffff',
+        strokeWeight: 1.5,
+      }},
+    }});
+  }});
+
+  // Start GPS watch
+  startGPS();
+}}
+
+function initOSMMap() {{
+  // Fallback: draw a simple SVG overview map when no Google key is available
+  const svgEl = document.getElementById('nav-map');
+  if (!POLYLINE.length) return;
+  const lats = POLYLINE.map(p=>p.lat), lons = POLYLINE.map(p=>p.lon);
+  const minLat=Math.min(...lats), maxLat=Math.max(...lats);
+  const minLon=Math.min(...lons), maxLon=Math.max(...lons);
+  const W=700, H=500;
+  const toX = lon => (lon-minLon)/(maxLon-minLon||1)*W;
+  const toY = lat => H-(lat-minLat)/(maxLat-minLat||1)*H;
+  let pts = POLYLINE.map(p=>`${{toX(p.lon)}},${{toY(p.lat)}}`).join(' ');
+  svgEl.innerHTML = `<svg viewBox="0 0 ${{W}} ${{H}}" style="width:100%;height:100%;background:#1e293b">
+    <polyline points="${{pts}}" fill="none" stroke="#f43f5e" stroke-width="3"/>
+    <circle cx="${{toX(ORIGIN.lon)}}" cy="${{toY(ORIGIN.lat)}}" r="8" fill="#10b981"/>
+    <circle cx="${{toX(DEST.lon)}}" cy="${{toY(DEST.lat)}}" r="8" fill="#ef4444"/>
+    <circle id="user-dot" cx="${{toX(ORIGIN.lon)}}" cy="${{toY(ORIGIN.lat)}}" r="6" fill="#3b82f6" stroke="#fff" stroke-width="2"/>
+    <text x="10" y="20" fill="#94a3b8" font-size="12" font-family="Inter,sans-serif">Overview map (no Google Maps key set)</text>
+  </svg>`;
+  svgEl._toX = toX; svgEl._toY = toY;
+  startGPS();
+}}
+
+function updateOSMDot(lat, lon) {{
+  const dot = document.getElementById('user-dot');
+  const svgEl = document.getElementById('nav-map');
+  if (dot && svgEl._toX) {{
+    dot.setAttribute('cx', svgEl._toX(lon));
+    dot.setAttribute('cy', svgEl._toY(lat));
+  }}
+}}
+
+// ──────────────────────────────────────────────
+// GPS WATCH
+// ──────────────────────────────────────────────
+function startGPS() {{
+  if (!navigator.geolocation) {{
+    document.getElementById('gps-badge').textContent = '❌ Geolocation not available';
+    return;
+  }}
+  watchId = navigator.geolocation.watchPosition(
+    function(pos) {{
+      lastPos = pos.coords;
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const acc = Math.round(pos.coords.accuracy);
+      document.getElementById('gps-badge').textContent = `📡 GPS ±${{acc}}m`;
+      updateHUD(lat, lon);
+      if (!GMAPS_KEY) updateOSMDot(lat, lon);
+    }},
+    function(err) {{
+      document.getElementById('gps-badge').textContent = '⚠️ GPS: ' + err.message;
+    }},
+    {{
+      enableHighAccuracy: true,
+      maximumAge: 2000,
+      timeout: 10000,
+    }}
+  );
+}}
+
+// ──────────────────────────────────────────────
+// START BUTTON
+// ──────────────────────────────────────────────
+document.getElementById('start-btn').addEventListener('click', function() {{
+  this.disabled = true;
+  this.textContent = '⏳ Starting…';
+  buildStepList();
+  document.getElementById('nav-hud').style.display = 'flex';
+  this.style.display = 'none';
+  // Trigger initial HUD with origin position
+  updateHUD(ORIGIN.lat, ORIGIN.lon);
+
+  if (GMAPS_KEY) {{
+    // Load Google Maps JS API dynamically with graceful fallback
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${{GMAPS_KEY}}&callback=initMap&loading=async`;
+    script.async = true;
+    script.defer = true;
+    // If Maps JS fails (API not enabled, referrer restriction, invalid key)
+    // fall back to the SVG overview map silently instead of showing the Google error screen.
+    script.onerror = function() {{
+      console.warn('Google Maps JS failed to load — falling back to SVG overview map.');
+      document.getElementById('gps-badge').textContent = '🗺️ Map tile unavailable — check Maps JS API key';
+      initOSMMap();
+    }};
+    // Suppress the Google-injected "Oops" error overlay that appears inside the iframe
+    window.gm_authFailure = function() {{
+      console.warn('Google Maps auth failure — falling back to SVG map.');
+      if (map) return; // already initialised somehow
+      initOSMMap();
+    }};
+    document.body.appendChild(script);
+  }} else {{
+    initOSMMap();
+  }}
+}});
+
+</script>
+</body>
+</html>
+"""
+
+    components.html(nav_widget_html, height=720, scrolling=False)
